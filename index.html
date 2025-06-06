@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fantasy Football Rankings</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <input type="text" id="rankerName" placeholder="Your Name" class="border rounded-md px-3 py-2">
+                <input type="text" id="year" value="2025" class="border rounded-md px-3 py-2">
+                <select id="scoringFormat" class="border rounded-md px-3 py-2">
+                    <option value="PPR">PPR</option>
+                    <option value="Half PPR">Half PPR</option>
+                    <option value="Standard">Standard</option>
+                </select>
+            </div>
+            
+            <h1 id="rankingsTitle" class="text-3xl font-bold text-center text-gray-800 mb-4">
+                2025 PPR Fantasy Football Rankings
+            </h1>
+            
+            <div class="flex flex-wrap justify-center gap-4">
+                <label class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 cursor-pointer">
+                    Load Rankings
+                    <input type="file" id="loadFileInput" accept=".json" class="hidden">
+                </label>
+                <button id="saveBtn" class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600">
+                    Save Rankings
+                </button>
+                <button id="draftBtn" onclick="toggleDraftMode()" class="bg-orange-500 text-white px-4 py-2 rounded-md hover:bg-orange-600">
+                    Draft Day
+                </button>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="bg-white rounded-lg shadow-md p-4 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input type="text" id="searchInput" placeholder="Search players..." class="border rounded-md px-3 py-2">
+                <select id="positionFilter" class="border rounded-md px-3 py-2">
+                    <option value="">All Positions</option>
+                    <option value="QB">QB</option>
+                    <option value="RB">RB</option>
+                    <option value="WR">WR</option>
+                    <option value="TE">TE</option>
+                    <option value="K">K</option>
+                    <option value="DST">DST</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Players List -->
+        <div class="bg-white rounded-lg shadow-md">
+            <div class="p-4 border-b">
+                <h2 class="text-xl font-semibold">Player Rankings</h2>
+            </div>
+            <div id="playersList" class="divide-y divide-gray-200"></div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let players = [];
+        let isDraftMode = false;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            setupEventListeners();
+            updateTitle();
+            loadPlayersFromFile();
+        });
+
+        function setupEventListeners() {
+            document.getElementById('rankerName').addEventListener('input', updateTitle);
+            document.getElementById('year').addEventListener('input', updateTitle);
+            document.getElementById('scoringFormat').addEventListener('change', updateTitle);
+            document.getElementById('searchInput').addEventListener('input', filterPlayers);
+            document.getElementById('positionFilter').addEventListener('change', filterPlayers);
+            document.getElementById('loadFileInput').addEventListener('change', loadRankings);
+            document.getElementById('saveBtn').addEventListener('click', saveRankings);
+        }
+
+        function loadPlayersFromFile() {
+            fetch('./players.json')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Players file not found');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    players = data.players;
+                    recalculateRanks();
+                    filterPlayers();
+                })
+                .catch(error => {
+                    console.error('Error loading players.json:', error);
+                    alert('Could not load players.json file. Please make sure the file is in the same folder as this HTML file.');
+                });
+        }
+
+        function updateTitle() {
+            const rankerName = document.getElementById('rankerName').value || '';
+            const year = document.getElementById('year').value || '2025';
+            const scoringFormat = document.getElementById('scoringFormat').value || 'PPR';
+            
+            let title = `${year} ${scoringFormat} Fantasy Football Rankings`;
+            if (rankerName) {
+                title = `${rankerName}'s ${title}`;
+            }
+            
+            document.getElementById('rankingsTitle').textContent = title;
+        }
+
+        function loadRankings(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        
+                        if (data.players && !data.rankerName) {
+                            // Basic player list
+                            players = data.players.map((player, index) => ({
+                                ...player,
+                                id: player.id || `player-${index}`,
+                                risk: player.risk || 'Medium',
+                                notes: player.notes || '',
+                                overallRank: player.overallRank || index + 1
+                            }));
+                            recalculateRanks();
+                        } else {
+                            // Full rankings file
+                            document.getElementById('rankerName').value = data.rankerName || '';
+                            document.getElementById('year').value = data.year || '2025';
+                            document.getElementById('scoringFormat').value = data.scoringFormat || 'PPR';
+                            players = data.players || [];
+                        }
+                        
+                        updateTitle();
+                        filterPlayers();
+                    } catch (error) {
+                        alert('Error loading file: ' + error.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function saveRankings() {
+            const data = {
+                rankerName: document.getElementById('rankerName').value,
+                year: document.getElementById('year').value,
+                scoringFormat: document.getElementById('scoringFormat').value,
+                players: players
+            };
+            
+            const rankerName = data.rankerName || 'Unknown';
+            const year = data.year || '2025';
+            const scoring = data.scoringFormat || 'PPR';
+            const filename = `${rankerName}${year}${scoring}Rankings.json`;
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function filterPlayers() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const positionFilter = document.getElementById('positionFilter').value;
+            
+            const filteredPlayers = players.filter(player => {
+                const matchesSearch = player.name.toLowerCase().includes(searchTerm) || 
+                                    player.team.toLowerCase().includes(searchTerm);
+                const matchesPosition = !positionFilter || player.position === positionFilter;
+                return matchesSearch && matchesPosition;
+            });
+            
+            renderPlayersList(filteredPlayers);
+        }
+
+        function renderPlayersList(playersToRender) {
+            const playersList = document.getElementById('playersList');
+            playersList.innerHTML = '';
+            
+            playersToRender.forEach(player => {
+                const playerElement = createPlayerElement(player);
+                playersList.appendChild(playerElement);
+            });
+            
+            new Sortable(playersList, {
+                animation: 150,
+                ghostClass: 'sortable-ghost',
+                onEnd: function(evt) {
+                    reorderPlayers(evt.oldIndex, evt.newIndex);
+                }
+            });
+        }
+
+        function createPlayerElement(player) {
+            const div = document.createElement('div');
+            div.className = `player-item p-4 cursor-move ${player.drafted ? 'bg-gray-200 opacity-50' : 'hover:bg-gray-50'}`;
+            div.dataset.playerId = player.id;
+            
+            div.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <div class="text-lg font-bold text-gray-600 w-8">${player.overallRank}</div>
+                        <div class="flex-1">
+                            <div class="flex items-center space-x-2">
+                                <span class="font-semibold">${player.name}</span>
+                                <span class="text-sm bg-${getPositionColor(player.position)}-100 text-${getPositionColor(player.position)}-800 px-2 py-1 rounded">${player.position}</span>
+                                <span class="text-sm text-gray-600">${player.team}</span>
+                                ${player.drafted ? '<span class="text-red-500 font-bold">DRAFTED</span>' : ''}
+                            </div>
+                            <div class="text-sm text-gray-500">
+                                ${player.position} ${player.positionRank} • Risk: ${player.risk}
+                                ${player.notes ? ` • ${player.notes}` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        ${isDraftMode ? 
+                            `<button onclick="toggleDrafted('${player.id}')" class="px-3 py-1 rounded text-sm ${player.drafted ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}">
+                                ${player.drafted ? 'Undraft' : 'Draft'}
+                            </button>` : ''
+                        }
+                        <button onclick="editNotes('${player.id}')" class="text-blue-500 hover:text-blue-700">
+                            📝
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            return div;
+        }
+
+        function getPositionColor(position) {
+            const colors = {
+                'QB': 'purple',
+                'RB': 'green',
+                'WR': 'blue',
+                'TE': 'yellow',
+                'K': 'gray',
+                'DST': 'red'
+            };
+            return colors[position] || 'gray';
+        }
+
+        function reorderPlayers(oldIndex, newIndex) {
+            const visiblePlayers = getVisiblePlayers();
+            const movedPlayer = visiblePlayers[oldIndex];
+            visiblePlayers.splice(oldIndex, 1);
+            visiblePlayers.splice(newIndex, 0, movedPlayer);
+            
+            visiblePlayers.forEach((player, index) => {
+                const playerInMainArray = players.find(p => p.id === player.id);
+                if (playerInMainArray) {
+                    playerInMainArray.overallRank = index + 1;
+                }
+            });
+            
+            recalculateRanks();
+            filterPlayers();
+        }
+
+        function getVisiblePlayers() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const positionFilter = document.getElementById('positionFilter').value;
+            
+            return players.filter(player => {
+                const matchesSearch = player.name.toLowerCase().includes(searchTerm) || 
+                                    player.team.toLowerCase().includes(searchTerm);
+                const matchesPosition = !positionFilter || player.position === positionFilter;
+                return matchesSearch && matchesPosition;
+            }).sort((a, b) => a.overallRank - b.overallRank);
+        }
+
+        function recalculateRanks() {
+            players.sort((a, b) => a.overallRank - b.overallRank);
+            
+            const positionRanks = {};
+            players.forEach((player, index) => {
+                player.overallRank = index + 1;
+                
+                if (!positionRanks[player.position]) {
+                    positionRanks[player.position] = 1;
+                } else {
+                    positionRanks[player.position]++;
+                }
+                player.positionRank = positionRanks[player.position];
+            });
+        }
+
+        function toggleDraftMode() {
+            isDraftMode = !isDraftMode;
+            const btn = document.getElementById('draftBtn');
+            btn.textContent = isDraftMode ? 'Exit Draft' : 'Draft Day';
+            btn.className = isDraftMode ? 
+                'bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-600' :
+                'bg-orange-500 text-white px-4 py-2 rounded-md hover:bg-orange-600';
+            filterPlayers();
+        }
+
+        function toggleDrafted(playerId) {
+            const player = players.find(p => p.id === playerId);
+            if (player) {
+                player.drafted = !player.drafted;
+                filterPlayers();
+            }
+        }
+
+        function editNotes(playerId) {
+            const player = players.find(p => p.id === playerId);
+            if (player) {
+                const newNotes = prompt('Edit notes for ' + player.name + ':', player.notes || '');
+                if (newNotes !== null) {
+                    player.notes = newNotes;
+                    filterPlayers();
+                }
+            }
+        }
+    </script>
+
+    <style>
+        .sortable-ghost {
+            opacity: 0.4;
+            background-color: #e5e7eb;
+        }
+        
+        .player-item {
+            transition: all 0.2s ease;
+        }
+        
+        .player-item:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+    </style>
+</body>
+</html>
