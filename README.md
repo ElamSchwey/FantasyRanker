@@ -13,7 +13,7 @@ A drag-and-drop fantasy football rankings app that helps you create, customize, 
 
 ## Live Demo
 
-**[Try it now!](https://elamschwey.github.io/fantasyranker)**
+**[Try it now!](https://elamschwey.github.io/FantasyRanker/)**
 
 ## Screenshots
 
