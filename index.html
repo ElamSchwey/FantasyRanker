@@ -4,27 +4,47 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fantasy Football Rankings</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'sans': ['Poppins', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .dragging {
+            opacity: 0.5;
+        }
+        .drag-over {
+            border-top: 3px solid #3b82f6;
+        }
+    </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
-    <div class="container mx-auto px-4 py-8">
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto p-4 max-w-6xl">
         <!-- Header -->
         <div class="bg-white rounded-lg shadow-md p-6 mb-6">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <input type="text" id="rankerName" placeholder="Your Name" class="border rounded-md px-3 py-2">
-                <input type="text" id="year" value="2025" class="border rounded-md px-3 py-2">
-                <select id="scoringFormat" class="border rounded-md px-3 py-2">
+                <input type="text" id="rankerName" placeholder="Your Name" class="border border-gray-300 rounded-md px-3 py-2">
+                <input type="text" id="year" placeholder="Year" value="2025" class="border border-gray-300 rounded-md px-3 py-2">
+                <select id="scoringFormat" class="border border-gray-300 rounded-md px-3 py-2">
                     <option value="PPR">PPR</option>
                     <option value="Half PPR">Half PPR</option>
                     <option value="Standard">Standard</option>
+                    <option value="Superflex">Superflex</option>
                 </select>
             </div>
             
-            <h1 id="rankingsTitle" class="text-3xl font-bold text-center text-gray-800 mb-4">
-                2025 PPR Fantasy Football Rankings
+            <h1 id="rankingsTitle" class="text-2xl font-bold text-center text-gray-800 mb-4">
+                Your 2025 PPR Fantasy Football Rankings
             </h1>
-            
+
             <div class="flex flex-wrap justify-center gap-4">
                 <label class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 cursor-pointer">
                     Load Rankings
@@ -33,7 +53,7 @@
                 <button id="saveBtn" class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600">
                     Save Rankings
                 </button>
-                <button id="draftBtn" onclick="toggleDraftMode()" class="bg-orange-500 text-white px-4 py-2 rounded-md hover:bg-orange-600">
+                <button id="draftBtn" class="bg-orange-500 text-white px-4 py-2 rounded-md hover:bg-orange-600">
                     Draft Day
                 </button>
             </div>
@@ -42,9 +62,9 @@
         <!-- Filters -->
         <div class="bg-white rounded-lg shadow-md p-4 mb-6">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input type="text" id="searchInput" placeholder="Search players..." class="border rounded-md px-3 py-2">
-                <select id="positionFilter" class="border rounded-md px-3 py-2">
-                    <option value="">All Positions</option>
+                <input type="text" id="searchInput" placeholder="Search players..." class="border border-gray-300 rounded-md px-3 py-2">
+                <select id="positionFilter" class="border border-gray-300 rounded-md px-3 py-2">
+                    <option value="ALL">All Positions</option>
                     <option value="QB">QB</option>
                     <option value="RB">RB</option>
                     <option value="WR">WR</option>
@@ -55,18 +75,27 @@
             </div>
         </div>
 
-        <!-- Players List -->
-        <div class="bg-white rounded-lg shadow-md">
-            <div class="p-4 border-b">
-                <h2 class="text-xl font-semibold">Player Rankings</h2>
+        <!-- Recently Drafted Section (only visible in draft mode) -->
+        <div id="recentlyDraftedSection" class="bg-red-50 rounded-lg shadow-md p-4 mb-6 hidden">
+            <h3 class="text-lg font-semibold text-red-800 mb-3">Recently Drafted</h3>
+            <div id="recentlyDraftedList" class="space-y-2">
+                <!-- Recently drafted players will appear here -->
             </div>
-            <div id="playersList" class="divide-y divide-gray-200"></div>
+        </div>
+
+        <!-- Rankings List -->
+        <div class="bg-white rounded-lg shadow-md p-4">
+            <div id="playersList" class="space-y-2">
+                <!-- Players will be loaded here -->
+            </div>
         </div>
     </div>
 
     <script>
-        // Global variables
         let players = [];
+        let filteredPlayers = [];
+        let expandedPlayerId = null;
+        let draftedPlayers = [];
         let isDraftMode = false;
 
         // Initialize
@@ -84,6 +113,7 @@
             document.getElementById('positionFilter').addEventListener('change', filterPlayers);
             document.getElementById('loadFileInput').addEventListener('change', loadRankings);
             document.getElementById('saveBtn').addEventListener('click', saveRankings);
+            document.getElementById('draftBtn').addEventListener('click', toggleDraftMode);
         }
 
         function loadPlayersFromFile() {
@@ -95,27 +125,317 @@
                     return response.json();
                 })
                 .then(data => {
-                    players = data.players;
+                    players = data.players.map((player, index) => ({
+                        ...player,
+                        id: player.id || `player-${index}`,
+                        risk: player.risk || 'Medium',
+                        notes: player.notes || '',
+                        overallRank: player.overallRank || index + 1
+                    }));
                     recalculateRanks();
                     filterPlayers();
                 })
                 .catch(error => {
                     console.error('Error loading players.json:', error);
-                    alert('Could not load players.json file. Please make sure the file is in the same folder as this HTML file.');
+                    // Don't alert on load failure - user can upload their own file
                 });
         }
 
         function updateTitle() {
-            const rankerName = document.getElementById('rankerName').value || '';
+            const name = document.getElementById('rankerName').value;
             const year = document.getElementById('year').value || '2025';
-            const scoringFormat = document.getElementById('scoringFormat').value || 'PPR';
+            const format = document.getElementById('scoringFormat').value || 'PPR';
             
-            let title = `${year} ${scoringFormat} Fantasy Football Rankings`;
-            if (rankerName) {
-                title = `${rankerName}'s ${title}`;
+            const titleText = name ? `${name}'s ${year} ${format} Fantasy Football Rankings` : `${year} ${format} Fantasy Football Rankings`;
+            document.getElementById('rankingsTitle').textContent = titleText;
+        }
+
+        function recalculateRanks() {
+            const positionCounts = {};
+            players.forEach((player, index) => {
+                if (!positionCounts[player.position]) {
+                    positionCounts[player.position] = 0;
+                }
+                positionCounts[player.position]++;
+                player.overallRank = index + 1;
+                player.positionRank = positionCounts[player.position];
+            });
+        }
+
+        function filterPlayers() {
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const position = document.getElementById('positionFilter').value;
+            
+            filteredPlayers = players.filter(player => {
+                const matchesSearch = player.name.toLowerCase().includes(search) || 
+                                    player.team.toLowerCase().includes(search);
+                const matchesPosition = position === 'ALL' || player.position === position;
+                return matchesSearch && matchesPosition;
+            });
+            
+            renderPlayers();
+        }
+
+        function renderPlayers() {
+            const container = document.getElementById('playersList');
+            container.innerHTML = '';
+
+            filteredPlayers.forEach((player, index) => {
+                const playerDiv = createPlayerElement(player, index);
+                container.appendChild(playerDiv);
+            });
+        }
+
+        function createPlayerElement(player, index) {
+            const div = document.createElement('div');
+            div.className = `${getRiskColor(player.risk)} border rounded-lg transition-all hover:shadow-md`;
+            
+            // Only make draggable if not in draft mode
+            if (!isDraftMode) {
+                div.draggable = true;
+                div.className += ' cursor-move';
+                // Add drag event listeners
+                div.addEventListener('dragstart', handleDragStart);
+                div.addEventListener('dragover', handleDragOver);
+                div.addEventListener('drop', handleDrop);
+                div.addEventListener('dragend', handleDragEnd);
             }
             
-            document.getElementById('rankingsTitle').textContent = title;
+            div.dataset.playerId = player.id;
+            div.dataset.index = index;
+
+            const actionButton = isDraftMode ? 
+                `<button onclick="draftPlayer('${player.id}')" 
+                        class="bg-red-600 w-8 h-8 rounded text-xs font-bold text-white hover:bg-red-700 flex items-center justify-center"
+                        title="Draft Player">
+                    D
+                </button>` :
+                `<button onclick="cycleRisk('${player.id}')" 
+                        class="${getRiskButtonColor(player.risk)} w-8 h-8 rounded text-xs font-bold text-white hover:opacity-80 flex items-center justify-center"
+                        title="${player.risk} Risk">
+                    ${getRiskSymbol(player.risk)}
+                </button>`;
+
+            const notesContent = isDraftMode ? 
+                `<div class="w-full border border-gray-300 rounded px-2 py-1 text-sm h-12 leading-tight bg-gray-100 flex items-center text-gray-600">${player.notes || ''}</div>` :
+                `<textarea placeholder="Add notes..." 
+                          onchange="updatePlayerNotes('${player.id}', this.value)"
+                          maxlength="100"
+                          class="w-full border border-gray-300 rounded px-2 py-1 text-sm resize-none h-12 leading-tight">${player.notes}</textarea>`;
+
+            div.innerHTML = `
+                <div class="p-2">
+                    <div class="flex items-center gap-1">
+                        <!-- Rank -->
+                        <div class="flex-shrink-0 w-12 text-center">
+                            <div class="font-bold text-2xl">${player.overallRank}</div>
+                        </div>
+
+                        <!-- Position Rank -->
+                        <div class="flex-shrink-0">
+                            <span class="${getPositionColor(player.position)} px-2 py-1 rounded text-sm font-medium">
+                                ${player.position}${player.positionRank}
+                            </span>
+                        </div>
+
+                        <!-- Player Info -->
+                        <div class="flex-grow px-2">
+                            <div class="font-semibold text-gray-800">${player.name}</div>
+                            <div class="text-xs text-gray-600">${player.team}</div>
+                        </div>
+
+                        <!-- Notes Section -->
+                        <div class="px-2 w-80 md:w-96 lg:w-[500px] xl:w-[600px]">
+                            ${notesContent}
+                        </div>
+
+                        <!-- Action Button (Risk or Draft) -->
+                        <div class="flex-shrink-0 flex items-center justify-center w-10">
+                            ${actionButton}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            return div;
+        }
+
+        function cycleRisk(playerId) {
+            const player = players.find(p => p.id === playerId);
+            if (player) {
+                const risks = ['Low', 'Medium', 'High'];
+                const currentIndex = risks.indexOf(player.risk);
+                const nextIndex = (currentIndex + 1) % risks.length;
+                player.risk = risks[nextIndex];
+                filterPlayers();
+            }
+        }
+
+        function toggleDraftMode() {
+            isDraftMode = !isDraftMode;
+            const btn = document.getElementById('draftBtn');
+            const section = document.getElementById('recentlyDraftedSection');
+            
+            if (isDraftMode) {
+                btn.textContent = 'Exit Draft';
+                btn.className = 'bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-600';
+                section.classList.remove('hidden');
+            } else {
+                btn.textContent = 'Draft Day';
+                btn.className = 'bg-orange-500 text-white px-4 py-2 rounded-md hover:bg-orange-600';
+                section.classList.add('hidden');
+            }
+            
+            renderPlayers();
+        }
+
+        function draftPlayer(playerId) {
+            const playerIndex = players.findIndex(p => p.id === playerId);
+            if (playerIndex !== -1) {
+                const [draftedPlayer] = players.splice(playerIndex, 1);
+                draftedPlayers.unshift(draftedPlayer); // Add to beginning of drafted list
+                
+                // Don't recalculate ranks - keep original ranks
+                filterPlayers();
+                renderRecentlyDrafted();
+            }
+        }
+
+        function undraftPlayer(playerId) {
+            const playerIndex = draftedPlayers.findIndex(p => p.id === playerId);
+            if (playerIndex !== -1) {
+                const [undraftedPlayer] = draftedPlayers.splice(playerIndex, 1);
+                players.push(undraftedPlayer);
+                
+                // Sort players back to original ranking order
+                players.sort((a, b) => a.overallRank - b.overallRank);
+                
+                filterPlayers();
+                renderRecentlyDrafted();
+            }
+        }
+
+        function renderRecentlyDrafted() {
+            const container = document.getElementById('recentlyDraftedList');
+            container.innerHTML = '';
+
+            draftedPlayers.slice(0, 3).forEach(player => { // Show last 3 drafted
+                const div = document.createElement('div');
+                div.className = 'bg-gray-100 border rounded-lg p-2 cursor-pointer hover:bg-gray-200';
+                div.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <span class="${getPositionColor(player.position)} px-2 py-1 rounded text-xs font-medium">
+                            ${player.position}
+                        </span>
+                        <div class="flex-grow">
+                            <span class="font-semibold">${player.name}</span>
+                            <span class="text-xs text-gray-600 ml-2">${player.team}</span>
+                        </div>
+                        <button onclick="undraftPlayer('${player.id}')" 
+                                class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600">
+                            UNDO
+                        </button>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function updatePlayerNotes(playerId, notes) {
+            const player = players.find(p => p.id === playerId);
+            if (player) {
+                player.notes = notes;
+            }
+        }
+
+        function getRiskColor(risk) {
+            switch (risk) {
+                case 'High': return 'bg-red-200 border-red-300';
+                case 'Medium': return 'bg-yellow-200 border-yellow-300';
+                case 'Low': return 'bg-green-200 border-green-300';
+                default: return 'bg-gray-200 border-gray-300';
+            }
+        }
+
+        function getRiskButtonColor(risk) {
+            switch (risk) {
+                case 'High': return 'bg-red-600';
+                case 'Medium': return 'bg-yellow-600';
+                case 'Low': return 'bg-green-600';
+                default: return 'bg-gray-600';
+            }
+        }
+
+        function getRiskSymbol(risk) {
+            switch (risk) {
+                case 'High': return 'H';
+                case 'Medium': return 'M';
+                case 'Low': return 'L';
+                default: return '?';
+            }
+        }
+
+        function getPositionColor(position) {
+            switch (position) {
+                case 'QB': return 'text-purple-600 bg-purple-100';
+                case 'RB': return 'text-blue-600 bg-blue-100';
+                case 'WR': return 'text-green-600 bg-green-100';
+                case 'TE': return 'text-orange-600 bg-orange-100';
+                case 'K': return 'text-pink-600 bg-pink-100';
+                case 'DST': return 'text-gray-600 bg-gray-100';
+                default: return 'text-gray-600 bg-gray-100';
+            }
+        }
+
+        // Drag and Drop functionality
+        let draggedElement = null;
+
+        function handleDragStart(e) {
+            draggedElement = this;
+            this.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        function handleDragOver(e) {
+            if (e.preventDefault) {
+                e.preventDefault();
+            }
+            this.classList.add('drag-over');
+            e.dataTransfer.dropEffect = 'move';
+            return false;
+        }
+
+        function handleDrop(e) {
+            if (e.stopPropagation) {
+                e.stopPropagation();
+            }
+
+            if (draggedElement !== this) {
+                const draggedId = draggedElement.dataset.playerId;
+                const targetId = this.dataset.playerId;
+                
+                const draggedIndex = players.findIndex(p => p.id === draggedId);
+                const targetIndex = players.findIndex(p => p.id === targetId);
+
+                if (draggedIndex !== -1 && targetIndex !== -1) {
+                    // Remove dragged player and insert at target position
+                    const [draggedPlayer] = players.splice(draggedIndex, 1);
+                    players.splice(targetIndex, 0, draggedPlayer);
+                    
+                    recalculateRanks();
+                    filterPlayers();
+                }
+            }
+
+            this.classList.remove('drag-over');
+            return false;
+        }
+
+        function handleDragEnd(e) {
+            this.classList.remove('dragging');
+            document.querySelectorAll('.drag-over').forEach(el => {
+                el.classList.remove('drag-over');
+            });
         }
 
         function loadRankings(event) {
@@ -126,8 +446,9 @@
                     try {
                         const data = JSON.parse(e.target.result);
                         
+                        // Check if this is a basic player list or full rankings
                         if (data.players && !data.rankerName) {
-                            // Basic player list
+                            // Basic player list - initialize with defaults
                             players = data.players.map((player, index) => ({
                                 ...player,
                                 id: player.id || `player-${index}`,
@@ -142,10 +463,14 @@
                             document.getElementById('year').value = data.year || '2025';
                             document.getElementById('scoringFormat').value = data.scoringFormat || 'PPR';
                             players = data.players || [];
+                            draftedPlayers = data.draftedPlayers || [];
                         }
                         
                         updateTitle();
                         filterPlayers();
+                        if (isDraftMode) {
+                            renderRecentlyDrafted();
+                        }
                     } catch (error) {
                         alert('Error loading file: ' + error.message);
                     }
@@ -159,14 +484,15 @@
                 rankerName: document.getElementById('rankerName').value,
                 year: document.getElementById('year').value,
                 scoringFormat: document.getElementById('scoringFormat').value,
-                players: players
+                players: players,
+                draftedPlayers: draftedPlayers
             };
-            
+
             const rankerName = data.rankerName || 'Unknown';
             const year = data.year || '2025';
             const scoring = data.scoringFormat || 'PPR';
             const filename = `${rankerName}${year}${scoring}Rankings.json`;
-            
+
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -175,178 +501,6 @@
             a.click();
             URL.revokeObjectURL(url);
         }
-
-        function filterPlayers() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const positionFilter = document.getElementById('positionFilter').value;
-            
-            const filteredPlayers = players.filter(player => {
-                const matchesSearch = player.name.toLowerCase().includes(searchTerm) || 
-                                    player.team.toLowerCase().includes(searchTerm);
-                const matchesPosition = !positionFilter || player.position === positionFilter;
-                return matchesSearch && matchesPosition;
-            });
-            
-            renderPlayersList(filteredPlayers);
-        }
-
-        function renderPlayersList(playersToRender) {
-            const playersList = document.getElementById('playersList');
-            playersList.innerHTML = '';
-            
-            playersToRender.forEach(player => {
-                const playerElement = createPlayerElement(player);
-                playersList.appendChild(playerElement);
-            });
-            
-            new Sortable(playersList, {
-                animation: 150,
-                ghostClass: 'sortable-ghost',
-                onEnd: function(evt) {
-                    reorderPlayers(evt.oldIndex, evt.newIndex);
-                }
-            });
-        }
-
-        function createPlayerElement(player) {
-            const div = document.createElement('div');
-            div.className = `player-item p-4 cursor-move ${player.drafted ? 'bg-gray-200 opacity-50' : 'hover:bg-gray-50'}`;
-            div.dataset.playerId = player.id;
-            
-            div.innerHTML = `
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-4">
-                        <div class="text-lg font-bold text-gray-600 w-8">${player.overallRank}</div>
-                        <div class="flex-1">
-                            <div class="flex items-center space-x-2">
-                                <span class="font-semibold">${player.name}</span>
-                                <span class="text-sm bg-${getPositionColor(player.position)}-100 text-${getPositionColor(player.position)}-800 px-2 py-1 rounded">${player.position}</span>
-                                <span class="text-sm text-gray-600">${player.team}</span>
-                                ${player.drafted ? '<span class="text-red-500 font-bold">DRAFTED</span>' : ''}
-                            </div>
-                            <div class="text-sm text-gray-500">
-                                ${player.position} ${player.positionRank} • Risk: ${player.risk}
-                                ${player.notes ? ` • ${player.notes}` : ''}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        ${isDraftMode ? 
-                            `<button onclick="toggleDrafted('${player.id}')" class="px-3 py-1 rounded text-sm ${player.drafted ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}">
-                                ${player.drafted ? 'Undraft' : 'Draft'}
-                            </button>` : ''
-                        }
-                        <button onclick="editNotes('${player.id}')" class="text-blue-500 hover:text-blue-700">
-                            📝
-                        </button>
-                    </div>
-                </div>
-            `;
-            
-            return div;
-        }
-
-        function getPositionColor(position) {
-            const colors = {
-                'QB': 'purple',
-                'RB': 'green',
-                'WR': 'blue',
-                'TE': 'yellow',
-                'K': 'gray',
-                'DST': 'red'
-            };
-            return colors[position] || 'gray';
-        }
-
-        function reorderPlayers(oldIndex, newIndex) {
-            const visiblePlayers = getVisiblePlayers();
-            const movedPlayer = visiblePlayers[oldIndex];
-            visiblePlayers.splice(oldIndex, 1);
-            visiblePlayers.splice(newIndex, 0, movedPlayer);
-            
-            visiblePlayers.forEach((player, index) => {
-                const playerInMainArray = players.find(p => p.id === player.id);
-                if (playerInMainArray) {
-                    playerInMainArray.overallRank = index + 1;
-                }
-            });
-            
-            recalculateRanks();
-            filterPlayers();
-        }
-
-        function getVisiblePlayers() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const positionFilter = document.getElementById('positionFilter').value;
-            
-            return players.filter(player => {
-                const matchesSearch = player.name.toLowerCase().includes(searchTerm) || 
-                                    player.team.toLowerCase().includes(searchTerm);
-                const matchesPosition = !positionFilter || player.position === positionFilter;
-                return matchesSearch && matchesPosition;
-            }).sort((a, b) => a.overallRank - b.overallRank);
-        }
-
-        function recalculateRanks() {
-            players.sort((a, b) => a.overallRank - b.overallRank);
-            
-            const positionRanks = {};
-            players.forEach((player, index) => {
-                player.overallRank = index + 1;
-                
-                if (!positionRanks[player.position]) {
-                    positionRanks[player.position] = 1;
-                } else {
-                    positionRanks[player.position]++;
-                }
-                player.positionRank = positionRanks[player.position];
-            });
-        }
-
-        function toggleDraftMode() {
-            isDraftMode = !isDraftMode;
-            const btn = document.getElementById('draftBtn');
-            btn.textContent = isDraftMode ? 'Exit Draft' : 'Draft Day';
-            btn.className = isDraftMode ? 
-                'bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-600' :
-                'bg-orange-500 text-white px-4 py-2 rounded-md hover:bg-orange-600';
-            filterPlayers();
-        }
-
-        function toggleDrafted(playerId) {
-            const player = players.find(p => p.id === playerId);
-            if (player) {
-                player.drafted = !player.drafted;
-                filterPlayers();
-            }
-        }
-
-        function editNotes(playerId) {
-            const player = players.find(p => p.id === playerId);
-            if (player) {
-                const newNotes = prompt('Edit notes for ' + player.name + ':', player.notes || '');
-                if (newNotes !== null) {
-                    player.notes = newNotes;
-                    filterPlayers();
-                }
-            }
-        }
     </script>
-
-    <style>
-        .sortable-ghost {
-            opacity: 0.4;
-            background-color: #e5e7eb;
-        }
-        
-        .player-item {
-            transition: all 0.2s ease;
-        }
-        
-        .player-item:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-    </style>
 </body>
 </html>
