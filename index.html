@@ -23,9 +23,19 @@
             transform: scale(1.02);
             box-shadow: 0 8px 25px rgba(0,0,0,0.15);
             z-index: 1000;
+            position: relative;
         }
         .drag-over {
-            border-top: 3px solid #3b82f6;
+            transform: translateY(-2px);
+            transition: transform 0.2s ease;
+        }
+        .drag-placeholder {
+            opacity: 0.3;
+            transform: scale(0.95);
+            transition: all 0.2s ease;
+        }
+        .player-item {
+            transition: transform 0.2s ease, opacity 0.2s ease;
         }
         .touch-draggable {
             touch-action: manipulation;
@@ -41,6 +51,14 @@
         @media (hover: none) and (pointer: coarse) {
             .touch-draggable {
                 padding: 0.75rem;
+            }
+            .notes-section {
+                display: none;
+            }
+        }
+        @media (hover: hover) and (pointer: fine) {
+            .notes-section {
+                display: block;
             }
         }
     </style>
@@ -207,7 +225,7 @@
 
         function createPlayerElement(player, index) {
             const div = document.createElement('div');
-            div.className = `${getRiskColor(player.risk)} border rounded-lg transition-all hover:shadow-md`;
+            div.className = `player-item ${getRiskColor(player.risk)} border rounded-lg transition-all hover:shadow-md`;
             
             // Only make draggable if not in draft mode
             if (!isDraftMode) {
@@ -269,7 +287,7 @@
                         </div>
 
                         <!-- Notes Section -->
-                        <div class="px-2 w-80 md:w-96 lg:w-[500px] xl:w-[600px]">
+                        <div class="notes-section px-2 w-80 md:w-96 lg:w-[500px] xl:w-[600px]">
                             ${notesContent}
                         </div>
 
@@ -411,24 +429,36 @@
             }
         }
 
-        // Drag and Drop functionality
+        // Drag and Drop functionality - Simplified and more reliable
         let draggedElement = null;
-        let touchStartY = 0;
-        let touchStartTime = 0;
+        let draggedIndex = -1;
         let isDragging = false;
+        let touchStartY = 0;
         let longPressTimer = null;
 
         function handleDragStart(e) {
+            // Reset any stuck state
+            cleanupDragState();
+            
             draggedElement = this;
+            draggedIndex = parseInt(this.dataset.index);
             this.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
+            isDragging = true;
         }
 
         function handleDragOver(e) {
             if (e.preventDefault) {
                 e.preventDefault();
             }
-            this.classList.add('drag-over');
+            
+            if (!isDragging || !draggedElement) return false;
+            
+            const targetIndex = parseInt(this.dataset.index);
+            if (targetIndex !== draggedIndex && targetIndex >= 0) {
+                performLiveReorder(targetIndex);
+            }
+            
             e.dataTransfer.dropEffect = 'move';
             return false;
         }
@@ -437,131 +467,147 @@
             if (e.stopPropagation) {
                 e.stopPropagation();
             }
-
-            if (draggedElement !== this) {
-                const draggedId = draggedElement.dataset.playerId;
-                const targetId = this.dataset.playerId;
-                
-                const draggedIndex = players.findIndex(p => p.id === draggedId);
-                const targetIndex = players.findIndex(p => p.id === targetId);
-
-                if (draggedIndex !== -1 && targetIndex !== -1) {
-                    // Remove dragged player and insert at target position
-                    const [draggedPlayer] = players.splice(draggedIndex, 1);
-                    players.splice(targetIndex, 0, draggedPlayer);
-                    
-                    recalculateRanks();
-                    filterPlayers();
-                }
+            
+            if (isDragging) {
+                finalizeDragOperation();
             }
-
-            this.classList.remove('drag-over');
             return false;
         }
 
         function handleDragEnd(e) {
-            this.classList.remove('dragging');
-            document.querySelectorAll('.drag-over').forEach(el => {
-                el.classList.remove('drag-over');
-            });
-            draggedElement = null;
+            cleanupDragState();
         }
 
-        // Touch event handlers for mobile
+        // Touch event handlers - Simplified
         function handleTouchStart(e) {
-            if (isDraftMode) return;
+            if (isDraftMode || isDragging) return;
             
             touchStartY = e.touches[0].clientY;
-            touchStartTime = Date.now();
-            isDragging = false;
+            
+            // Clear any existing timer
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+            }
             
             // Start long press timer
             longPressTimer = setTimeout(() => {
-                if (!isDragging) {
-                    startTouchDrag(this);
-                }
-            }, 200); // 200ms long press
+                startTouchDrag(this);
+            }, 200);
         }
 
         function handleTouchMove(e) {
+            // Cancel long press if finger moves too much during timer
             if (longPressTimer) {
-                clearTimeout(longPressTimer);
-                longPressTimer = null;
+                const currentY = e.touches[0].clientY;
+                const deltaY = Math.abs(currentY - touchStartY);
+                
+                if (deltaY > 15) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
             }
             
-            const currentY = e.touches[0].clientY;
-            const deltaY = Math.abs(currentY - touchStartY);
-            
-            if (deltaY > 10) {
-                isDragging = true;
-            }
-            
-            if (draggedElement) {
+            if (isDragging && draggedElement) {
                 e.preventDefault();
                 
                 // Find element under finger
                 const touch = e.touches[0];
                 const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
-                const playerElement = elementBelow?.closest('[data-player-id]');
+                const playerElement = elementBelow?.closest('.player-item');
                 
                 if (playerElement && playerElement !== draggedElement) {
-                    // Remove previous highlights
-                    document.querySelectorAll('.drag-over').forEach(el => {
-                        el.classList.remove('drag-over');
-                    });
-                    // Add highlight to target
-                    playerElement.classList.add('drag-over');
+                    const targetIndex = parseInt(playerElement.dataset.index);
+                    if (targetIndex >= 0) {
+                        performLiveReorder(targetIndex);
+                    }
                 }
             }
         }
 
         function handleTouchEnd(e) {
+            // Clear timer
             if (longPressTimer) {
                 clearTimeout(longPressTimer);
                 longPressTimer = null;
             }
             
-            if (draggedElement) {
-                // Find the target element
-                const touch = e.changedTouches[0];
-                const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
-                const targetElement = elementBelow?.closest('[data-player-id]');
-                
-                if (targetElement && targetElement !== draggedElement) {
-                    const draggedId = draggedElement.dataset.playerId;
-                    const targetId = targetElement.dataset.playerId;
-                    
-                    const draggedIndex = players.findIndex(p => p.id === draggedId);
-                    const targetIndex = players.findIndex(p => p.id === targetId);
-
-                    if (draggedIndex !== -1 && targetIndex !== -1) {
-                        const [draggedPlayer] = players.splice(draggedIndex, 1);
-                        players.splice(targetIndex, 0, draggedPlayer);
-                        
-                        recalculateRanks();
-                        filterPlayers();
-                    }
-                }
-                
-                // Clean up
-                draggedElement.classList.remove('dragging');
-                document.querySelectorAll('.drag-over').forEach(el => {
-                    el.classList.remove('drag-over');
-                });
-                draggedElement = null;
+            if (isDragging) {
+                finalizeDragOperation();
             }
-            
-            isDragging = false;
         }
 
         function startTouchDrag(element) {
+            // Reset state first
+            cleanupDragState();
+            
             draggedElement = element;
+            draggedIndex = parseInt(element.dataset.index);
+            isDragging = true;
             element.classList.add('dragging');
             
-            // Add haptic feedback if available
+            // Haptic feedback
             if (navigator.vibrate) {
                 navigator.vibrate(50);
             }
+        }
+
+        function performLiveReorder(targetIndex) {
+            if (!isDragging || targetIndex === draggedIndex) return;
+            
+            // Simple visual feedback - just highlight target
+            document.querySelectorAll('.drag-over').forEach(el => {
+                el.classList.remove('drag-over');
+            });
+            
+            const targetElement = document.querySelector(`[data-index="${targetIndex}"]`);
+            if (targetElement) {
+                targetElement.classList.add('drag-over');
+            }
+        }
+
+        function finalizeDragOperation() {
+            if (!draggedElement || !isDragging) {
+                cleanupDragState();
+                return;
+            }
+            
+            // Find target from highlighted element
+            const targetElement = document.querySelector('.drag-over');
+            if (targetElement) {
+                const draggedPlayerId = draggedElement.dataset.playerId;
+                const targetPlayerId = targetElement.dataset.playerId;
+                
+                const draggedPlayerIndex = players.findIndex(p => p.id === draggedPlayerId);
+                const targetPlayerIndex = players.findIndex(p => p.id === targetPlayerId);
+                
+                if (draggedPlayerIndex !== -1 && targetPlayerIndex !== -1 && draggedPlayerIndex !== targetPlayerIndex) {
+                    // Move player in array
+                    const [draggedPlayer] = players.splice(draggedPlayerIndex, 1);
+                    players.splice(targetPlayerIndex, 0, draggedPlayer);
+                    
+                    recalculateRanks();
+                    filterPlayers();
+                }
+            }
+            
+            cleanupDragState();
+        }
+
+        function cleanupDragState() {
+            // Clear all drag-related classes and state
+            document.querySelectorAll('.dragging, .drag-over, .drag-placeholder').forEach(el => {
+                el.classList.remove('dragging', 'drag-over', 'drag-placeholder');
+                el.style.transform = '';
+            });
+            
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            
+            draggedElement = null;
+            draggedIndex = -1;
+            isDragging = false;
         }
 
         function loadRankings(event) {
