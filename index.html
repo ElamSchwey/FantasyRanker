@@ -243,6 +243,12 @@
                 placeholder.classList.add('drag-placeholder');
                 draggedElement.parentNode.insertBefore(placeholder, draggedElement);
                 
+                // Store original rect for consistent positioning
+                draggedElement.dataset.originalRect = JSON.stringify({
+                    left: rect.left,
+                    top: rect.top
+                });
+                
                 // Style dragged element
                 draggedElement.classList.add('touch-drag-active');
                 draggedElement.style.width = rect.width + 'px';
@@ -270,14 +276,14 @@
             e.preventDefault();
             const touch = e.touches[0];
             
-            // Update dragged element position
+            // Update dragged element position using original start position
             if (draggedElement && draggedElement.classList.contains('touch-drag-active')) {
                 const offsetX = touch.clientX - touchStartX;
                 const offsetY = touch.clientY - touchStartY;
-                const rect = placeholder.getBoundingClientRect();
+                const originalRect = JSON.parse(draggedElement.dataset.originalRect);
                 
-                draggedElement.style.left = (rect.left + offsetX) + 'px';
-                draggedElement.style.top = (rect.top + offsetY) + 'px';
+                draggedElement.style.left = (originalRect.left + offsetX) + 'px';
+                draggedElement.style.top = (originalRect.top + offsetY) + 'px';
             }
             
             // Find element under touch point
@@ -309,6 +315,7 @@
                 draggedElement.style.height = '';
                 draggedElement.style.left = '';
                 draggedElement.style.top = '';
+                delete draggedElement.dataset.originalRect;
                 
                 // Update player order
                 const newOrder = Array.from(document.querySelectorAll('.player-item')).map(el => 
