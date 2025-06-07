@@ -26,6 +26,9 @@
             z-index: 10000 !important;
             pointer-events: none !important;
             transition: none !important;
+            opacity: 0.8 !important;
+            transform: scale(1.05) rotate(2deg) !important;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.7) !important;
         }
         
         .drag-placeholder {
@@ -232,6 +235,9 @@
                 draggedElement = playerItem;
                 draggedIndex = parseInt(playerItem.dataset.index);
                 
+                // Store original position
+                const rect = draggedElement.getBoundingClientRect();
+                
                 // Create placeholder
                 placeholder = draggedElement.cloneNode(true);
                 placeholder.classList.add('drag-placeholder');
@@ -239,12 +245,14 @@
                 
                 // Style dragged element
                 draggedElement.classList.add('touch-drag-active');
-                draggedElement.style.width = draggedElement.offsetWidth + 'px';
-                updateDragPosition(touch);
+                draggedElement.style.width = rect.width + 'px';
+                draggedElement.style.height = rect.height + 'px';
+                draggedElement.style.left = rect.left + 'px';
+                draggedElement.style.top = rect.top + 'px';
                 
                 // Haptic feedback if available
                 if (navigator.vibrate) navigator.vibrate(50);
-            }, 300); // 300ms long press
+            }, 200);
         }
 
         function handleTouchMove(e) {
@@ -261,7 +269,16 @@
             
             e.preventDefault();
             const touch = e.touches[0];
-            updateDragPosition(touch);
+            
+            // Update dragged element position
+            if (draggedElement && draggedElement.classList.contains('touch-drag-active')) {
+                const offsetX = touch.clientX - touchStartX;
+                const offsetY = touch.clientY - touchStartY;
+                const rect = placeholder.getBoundingClientRect();
+                
+                draggedElement.style.left = (rect.left + offsetX) + 'px';
+                draggedElement.style.top = (rect.top + offsetY) + 'px';
+            }
             
             // Find element under touch point
             const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
@@ -285,8 +302,13 @@
             if (touchDragging && draggedElement && placeholder) {
                 // Replace placeholder with dragged element
                 placeholder.parentNode.replaceChild(draggedElement, placeholder);
+                
+                // Clean up styles
                 draggedElement.classList.remove('touch-drag-active');
-                draggedElement.style = '';
+                draggedElement.style.width = '';
+                draggedElement.style.height = '';
+                draggedElement.style.left = '';
+                draggedElement.style.top = '';
                 
                 // Update player order
                 const newOrder = Array.from(document.querySelectorAll('.player-item')).map(el => 
@@ -300,13 +322,6 @@
             touchDragging = false;
             draggedElement = null;
             placeholder = null;
-        }
-
-        function updateDragPosition(touch) {
-            if (draggedElement) {
-                draggedElement.style.left = (touch.clientX - touchStartX) + 'px';
-                draggedElement.style.top = (touch.clientY - touchStartY) + 'px';
-            }
         }
 
         // Player actions
