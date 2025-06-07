@@ -19,10 +19,29 @@
     </script>
     <style>
         .dragging {
-            opacity: 0.5;
+            opacity: 0.7;
+            transform: scale(1.02);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            z-index: 1000;
         }
         .drag-over {
             border-top: 3px solid #3b82f6;
+        }
+        .touch-draggable {
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+        .touch-draggable:active {
+            transform: scale(0.98);
+            transition: transform 0.1s ease;
+        }
+        @media (hover: none) and (pointer: coarse) {
+            .touch-draggable {
+                padding: 0.75rem;
+            }
         }
     </style>
 </head>
@@ -193,12 +212,17 @@
             // Only make draggable if not in draft mode
             if (!isDraftMode) {
                 div.draggable = true;
-                div.className += ' cursor-move';
+                div.className += ' cursor-move touch-draggable';
                 // Add drag event listeners
                 div.addEventListener('dragstart', handleDragStart);
                 div.addEventListener('dragover', handleDragOver);
                 div.addEventListener('drop', handleDrop);
                 div.addEventListener('dragend', handleDragEnd);
+                
+                // Add touch event listeners for better mobile support
+                div.addEventListener('touchstart', handleTouchStart, { passive: false });
+                div.addEventListener('touchmove', handleTouchMove, { passive: false });
+                div.addEventListener('touchend', handleTouchEnd, { passive: false });
             }
             
             div.dataset.playerId = player.id;
@@ -389,6 +413,10 @@
 
         // Drag and Drop functionality
         let draggedElement = null;
+        let touchStartY = 0;
+        let touchStartTime = 0;
+        let isDragging = false;
+        let longPressTimer = null;
 
         function handleDragStart(e) {
             draggedElement = this;
@@ -436,6 +464,104 @@
             document.querySelectorAll('.drag-over').forEach(el => {
                 el.classList.remove('drag-over');
             });
+            draggedElement = null;
+        }
+
+        // Touch event handlers for mobile
+        function handleTouchStart(e) {
+            if (isDraftMode) return;
+            
+            touchStartY = e.touches[0].clientY;
+            touchStartTime = Date.now();
+            isDragging = false;
+            
+            // Start long press timer
+            longPressTimer = setTimeout(() => {
+                if (!isDragging) {
+                    startTouchDrag(this);
+                }
+            }, 200); // 200ms long press
+        }
+
+        function handleTouchMove(e) {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            
+            const currentY = e.touches[0].clientY;
+            const deltaY = Math.abs(currentY - touchStartY);
+            
+            if (deltaY > 10) {
+                isDragging = true;
+            }
+            
+            if (draggedElement) {
+                e.preventDefault();
+                
+                // Find element under finger
+                const touch = e.touches[0];
+                const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+                const playerElement = elementBelow?.closest('[data-player-id]');
+                
+                if (playerElement && playerElement !== draggedElement) {
+                    // Remove previous highlights
+                    document.querySelectorAll('.drag-over').forEach(el => {
+                        el.classList.remove('drag-over');
+                    });
+                    // Add highlight to target
+                    playerElement.classList.add('drag-over');
+                }
+            }
+        }
+
+        function handleTouchEnd(e) {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            
+            if (draggedElement) {
+                // Find the target element
+                const touch = e.changedTouches[0];
+                const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+                const targetElement = elementBelow?.closest('[data-player-id]');
+                
+                if (targetElement && targetElement !== draggedElement) {
+                    const draggedId = draggedElement.dataset.playerId;
+                    const targetId = targetElement.dataset.playerId;
+                    
+                    const draggedIndex = players.findIndex(p => p.id === draggedId);
+                    const targetIndex = players.findIndex(p => p.id === targetId);
+
+                    if (draggedIndex !== -1 && targetIndex !== -1) {
+                        const [draggedPlayer] = players.splice(draggedIndex, 1);
+                        players.splice(targetIndex, 0, draggedPlayer);
+                        
+                        recalculateRanks();
+                        filterPlayers();
+                    }
+                }
+                
+                // Clean up
+                draggedElement.classList.remove('dragging');
+                document.querySelectorAll('.drag-over').forEach(el => {
+                    el.classList.remove('drag-over');
+                });
+                draggedElement = null;
+            }
+            
+            isDragging = false;
+        }
+
+        function startTouchDrag(element) {
+            draggedElement = element;
+            element.classList.add('dragging');
+            
+            // Add haptic feedback if available
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
         }
 
         function loadRankings(event) {
